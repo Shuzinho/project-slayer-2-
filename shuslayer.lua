@@ -1125,6 +1125,188 @@ end
 
 
 --========================================================--
+-- 🛡️ PROTEÇÃO DO CLAN ATUAL
+--========================================================--
+
+-- Por segurança, qualquer Clan Rare ou superior é protegido.
+-- Assim, ao relogar com um Clan bom, o Auto Spin não pode
+-- começar a girar e substituir esse Clan automaticamente.
+local PROTECT_GOOD_CLANS = true
+
+local PROTECTED_RARITIES = {
+    Rare = true,
+    Legendary = true,
+    Mythic = true,
+    Supreme = true
+}
+
+
+local function getPlayerDataContainer()
+
+    local roots = {
+        LocalPlayer,
+        ReplicatedStorage
+    }
+
+    for _, root in ipairs(roots) do
+
+        local playerService = root:FindFirstChild("Player_Service")
+
+        if playerService then
+
+            local dataRoot = playerService:FindFirstChild("Data")
+
+            if dataRoot then
+
+                -- Primeiro tenta pelo nome do jogador.
+                local exact = dataRoot:FindFirstChild(LocalPlayer.Name)
+
+                if exact then
+                    return exact
+                end
+
+                -- Alguns servidores usam um identificador diferente
+                -- no lugar do nome. Procura o container que possui
+                -- RedeemedCodes, que já foi identificado como parte
+                -- dos dados do jogador.
+                for _, child in ipairs(dataRoot:GetChildren()) do
+                    if child:FindFirstChild("RedeemedCodes", true) then
+                        return child
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+
+local function readClanFromRoot(root)
+
+    if not root then
+        return nil
+    end
+
+    -- Attributes
+    local ok, attributeClan = pcall(function()
+        return root:GetAttribute("Clan")
+    end)
+
+    if ok and type(attributeClan) == "string" and attributeClan ~= "" then
+        return attributeClan
+    end
+
+    local okCurrent, currentAttribute = pcall(function()
+        return root:GetAttribute("CurrentClan")
+    end)
+
+    if okCurrent and type(currentAttribute) == "string" and currentAttribute ~= "" then
+        return currentAttribute
+    end
+
+    -- Valores chamados exatamente Clan / CurrentClan.
+    for _, obj in ipairs(root:GetDescendants()) do
+
+        if obj.Name == "Clan" or obj.Name == "CurrentClan" then
+
+            if obj:IsA("StringValue") then
+                local value = obj.Value
+                if type(value) == "string" and value ~= "" then
+                    return value
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+
+local function getCurrentClan()
+
+    -- 1. Atributos do jogador
+    local clan = readClanFromRoot(LocalPlayer)
+    if clan then
+        return clan
+    end
+
+    -- 2. Dados do jogador
+    local data = getPlayerDataContainer()
+    clan = readClanFromRoot(data)
+
+    if clan then
+        return clan
+    end
+
+    return nil
+end
+
+
+local function isClanProtected(clanName)
+
+    if not clanName then
+        return false
+    end
+
+    -- Qualquer alvo configurado pelo usuário também fica protegido.
+    if isTarget(clanName) then
+        return true
+    end
+
+    if not PROTECT_GOOD_CLANS then
+        return false
+    end
+
+    local rarity = getRarityName(clanName)
+
+    return PROTECTED_RARITIES[rarity] == true
+end
+
+
+local function notifyProtectedClan(clanName)
+
+    local rarity = getRarityName(clanName)
+
+    print("========================================")
+    print("[🛡️ PROTEÇÃO] Spin bloqueado")
+    print("Clan atual:", tostring(clanName))
+    print("Raridade:", tostring(rarity))
+    print("========================================")
+
+    Rayfield:Notify({
+        Title = "🛡️ Clan Protegido",
+        Content =
+            tostring(clanName)
+            .. " | "
+            .. tostring(rarity)
+            .. "\nAuto Spin não será iniciado.",
+        Duration = 8
+    })
+end
+
+
+local function waitForCurrentClan(timeout)
+
+    local deadline = os.clock() + (timeout or 15)
+
+    repeat
+
+        local clan = getCurrentClan()
+
+        if clan then
+            return clan
+        end
+
+        task.wait(0.25)
+
+    until os.clock() >= deadline
+
+    return nil
+end
+
+
+--========================================================--
 -- TABS
 --========================================================--
 
@@ -1581,6 +1763,28 @@ SpinTab:CreateButton({
         end
 
 
+        -- 🛡️ Proteção também vale para o spin manual.
+        -- Se o Clan atual for Rare+ (ou um alvo configurado),
+        -- o script não envia ClanSpin.
+        local currentClan = waitForCurrentClan(10)
+
+        if currentClan and isClanProtected(currentClan) then
+            notifyProtectedClan(currentClan)
+            return
+        end
+
+        if not currentClan then
+            Rayfield:Notify({
+                Title = "🛡️ Proteção",
+                Content =
+                    "Não foi possível confirmar seu Clan atual.\n"
+                    .. "Spin bloqueado por segurança.",
+                Duration = 8
+            })
+            warn("[Proteção] Clan atual não foi detectado. Spin manual bloqueado.")
+            return
+        end
+
         spinning = true
 
 
@@ -1738,25 +1942,63 @@ SpinTab:CreateToggle({
         end
 
 
-        clearTarget()
-
-        updateStatusVisual()
-
-
-        Rayfield:Notify({
-
-            Title =
-                "🌀 Auto Spin",
-
-            Content =
-                "Auto Spin iniciado.",
-
-            Duration = 3
-
-        })
-
-
+        -- 🛡️ ANTES DE QUALQUER ClanSpin, confirma o Clan atual.
+        -- Isso é especialmente importante após relogar, quando o
+        -- Rayfield pode restaurar o Auto Spin automaticamente.
         task.spawn(function()
+
+            local currentClan = waitForCurrentClan(15)
+
+            -- O usuário desligou enquanto estávamos esperando.
+            if not autoSpin then
+                return
+            end
+
+            -- Se não conseguimos descobrir o Clan, NÃO arrisca girar.
+            if not currentClan then
+
+                autoSpin = false
+                spinning = false
+                updateStatusVisual()
+
+                Rayfield:Notify({
+                    Title = "🛡️ Proteção ativada",
+                    Content =
+                        "Não foi possível confirmar seu Clan atual.\n"
+                        .. "Auto Spin foi bloqueado por segurança.",
+                    Duration = 10
+                })
+
+                warn("[Proteção] Clan atual não foi detectado. Auto Spin bloqueado.")
+                return
+            end
+
+            -- Se já possui Clan bom, NÃO envia ClanSpin.
+            if isClanProtected(currentClan) then
+
+                autoSpin = false
+                spinning = false
+                updateStatusVisual()
+
+                notifyProtectedClan(currentClan)
+                return
+            end
+
+            clearTarget()
+            updateStatusVisual()
+
+            Rayfield:Notify({
+
+                Title =
+                    "🌀 Auto Spin",
+
+                Content =
+                    "Auto Spin iniciado.\nClan atual: "
+                    .. tostring(currentClan),
+
+                Duration = 4
+
+            })
 
             while autoSpin do
 
