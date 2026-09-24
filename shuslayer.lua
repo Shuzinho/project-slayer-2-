@@ -1098,6 +1098,12 @@ local selectedRarities = {}
 
 local autoSpin = false
 local autoSpinStarting = false
+
+-- Quando um Clan alvo é encontrado, o jogo mantém o Clan antigo
+-- na interface/Data até reiniciar/recarregar a sessão.
+-- Portanto, não permitimos iniciar outro ClanSpin nesta mesma sessão.
+local targetLockedUntilReload = false
+local targetLockedClan = nil
 local startupSequenceDone = false
 -- Impede o Auto Spin de iniciar enquanto o Rayfield restaura a configuração.
 -- As raridades podem ser restauradas depois do toggle AutoSpin.
@@ -2004,6 +2010,11 @@ local function showTargetFound(
     end)
 
 
+    -- O jogo só aplica/mostra o novo Clan após reiniciar/recarregar a sessão.
+    -- Bloqueia um novo Auto Spin nesta mesma sessão para não ler o Clan antigo.
+    targetLockedUntilReload = true
+    targetLockedClan = clanName
+
     Rayfield:Notify({
 
         Title =
@@ -2265,6 +2276,36 @@ SpinTab:CreateToggle({
             return
         end
 
+
+        -- Se um alvo já foi encontrado nesta sessão, o jogo ainda pode
+        -- mostrar o Clan antigo até reiniciar. Não faça outro giro.
+        if targetLockedUntilReload then
+
+            autoSpin = false
+            spinning = false
+            autoSpinStarting = false
+            updateStatusVisual()
+
+            local lockedName = targetLockedClan or targetClan or "o Clan alvo"
+
+            Rayfield:Notify({
+                Title = "🛑 Reinício necessário",
+                Content =
+                    tostring(lockedName)
+                    .. " foi encontrado.\n"
+                    .. "O jogo só aplica o Clan após reiniciar.\n"
+                    .. "Auto Spin continua bloqueado nesta sessão.",
+                Duration = 10
+            })
+
+            warn(
+                "[Proteção] Novo Auto Spin bloqueado: alvo encontrado = "
+                .. tostring(lockedName)
+                .. ". Reinicie a sessão para aplicar o Clan."
+            )
+
+            return
+        end
 
         if spinning or autoSpinStarting then
             return
