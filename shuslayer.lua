@@ -1036,6 +1036,9 @@ local selectedRarities = {}
 --========================================================--
 
 local autoSpin = false
+-- Impede o Auto Spin de iniciar enquanto o Rayfield restaura a configuração.
+-- As raridades podem ser restauradas depois do toggle AutoSpin.
+local loadingConfiguration = true
 local spinning = false
 
 local spinCount = 0
@@ -2012,7 +2015,21 @@ SpinTab:CreateToggle({
         -- Rayfield pode restaurar o Auto Spin automaticamente.
         task.spawn(function()
 
-            local currentClan = waitForCurrentClan(15)
+            -- Quando o Rayfield restaura AutoSpin, ele pode executar este
+            -- callback antes de restaurar as raridades selecionadas.
+            -- Aguarda o fim do LoadConfiguration antes de verificar o Clan.
+            if loadingConfiguration then
+                local deadline = os.clock() + 5
+                while loadingConfiguration and os.clock() < deadline do
+                    task.wait(0.1)
+                end
+            end
+
+            if not autoSpin then
+                return
+            end
+
+            local currentClan = waitForCurrentClan(20)
 
             -- O usuário desligou enquanto estávamos esperando.
             if not autoSpin then
@@ -3324,6 +3341,11 @@ pcall(function()
     Rayfield:LoadConfiguration()
 
 end)
+
+-- A partir daqui, todas as flags da configuração já tiveram a chance
+-- de ser restauradas. O Auto Spin só poderá iniciar depois desta linha.
+loadingConfiguration = false
+print("[Proteção] LoadConfiguration concluído; Auto Spin liberado para verificar o Clan.")
 
 
 --========================================================--
