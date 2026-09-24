@@ -1275,6 +1275,65 @@ end
 
 
 --========================================================--
+-- 🎨 ABRIR CUSTOMIZE AUTOMATICAMENTE
+--========================================================--
+
+local function openCustomize()
+
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+
+    if not playerGui then
+        warn("[Customize] PlayerGui não encontrado.")
+        return false
+    end
+
+    local components = playerGui:FindFirstChild("Components")
+    local menu = components and components:FindFirstChild("Menu")
+    local optionsHolder = menu and menu:FindFirstChild("OptionsHolder")
+    local presenter = optionsHolder and optionsHolder:FindFirstChild("2-CUSTOMIZE-Presenter")
+    local button = presenter and presenter:FindFirstChild("Button")
+
+    if not button then
+        warn("[Customize] Botão CUSTOMIZE não encontrado.")
+        return false
+    end
+
+    if type(firesignal) ~= "function" then
+        warn("[Customize] firesignal não está disponível.")
+        return false
+    end
+
+    local success, err = pcall(function()
+        firesignal(button.MouseButton1Click)
+    end)
+
+    if not success then
+        warn("[Customize] Falha ao acionar o botão:", tostring(err))
+        return false
+    end
+
+    print("[Customize] ✅ Botão CUSTOMIZE acionado.")
+    return true
+end
+
+
+local function openCustomizeAndWait()
+
+    local opened = openCustomize()
+
+    if not opened then
+        return false
+    end
+
+    -- Dá tempo para a interface/área do Customize abrir.
+    task.wait(1)
+
+    print("[Customize] Área de Customize carregada.")
+    return true
+end
+
+
+--========================================================--
 -- TABS
 --========================================================--
 
@@ -1925,6 +1984,31 @@ SpinTab:CreateToggle({
                 end
             end
 
+            if not autoSpin then
+                return
+            end
+
+            -- Primeiro abre o menu/área de Customize.
+            -- O clique é feito uma única vez por inicialização do Auto Spin.
+            if not openCustomizeAndWait() then
+
+                autoSpin = false
+                spinning = false
+                updateStatusVisual()
+
+                Rayfield:Notify({
+                    Title = "🎨 Customize",
+                    Content =
+                        "Não foi possível abrir o menu CUSTOMIZE.\\n"
+                        .. "Auto Spin foi bloqueado por segurança.",
+                    Duration = 8
+                })
+
+                warn("[Customize] Auto Spin bloqueado porque CUSTOMIZE não pôde ser aberto.")
+                return
+            end
+
+            -- O usuário desligou enquanto o Customize estava abrindo.
             if not autoSpin then
                 return
             end
