@@ -1128,17 +1128,15 @@ end
 -- 🛡️ PROTEÇÃO DO CLAN ATUAL
 --========================================================--
 
--- Por segurança, qualquer Clan Rare ou superior é protegido.
--- Assim, ao relogar com um Clan bom, o Auto Spin não pode
--- começar a girar e substituir esse Clan automaticamente.
-local PROTECT_GOOD_CLANS = true
-
-local PROTECTED_RARITIES = {
-    Rare = true,
-    Legendary = true,
-    Mythic = true,
-    Supreme = true
-}
+-- A proteção é baseada SOMENTE no que o usuário selecionou.
+-- Ex.: Legendary selecionado + conta começa com Supreme = pode girar.
+-- Ex.: Legendary + Supreme selecionados + conta começa com qualquer
+-- um deles = não gira.
+--
+-- Importante: antes de qualquer ClanSpin, o script precisa conseguir
+-- confirmar o Clan atual. Se não conseguir, ele BLOQUEIA o spin por
+-- segurança, evitando perder um Clan bom após relogar.
+local PROTECT_SELECTED_ONLY = true
 
 
 local function getPlayerDataContainer()
@@ -1165,10 +1163,8 @@ local function getPlayerDataContainer()
                     return exact
                 end
 
-                -- Alguns servidores usam um identificador diferente
-                -- no lugar do nome. Procura o container que possui
-                -- RedeemedCodes, que já foi identificado como parte
-                -- dos dados do jogador.
+                -- Também procura um container de dados que possua
+                -- RedeemedCodes, estrutura já observada neste jogo.
                 for _, child in ipairs(dataRoot:GetChildren()) do
                     if child:FindFirstChild("RedeemedCodes", true) then
                         return child
@@ -1182,39 +1178,90 @@ local function getPlayerDataContainer()
 end
 
 
+local function isKnownClanName(value)
+
+    if type(value) ~= "string" or value == "" then
+        return false
+    end
+
+    -- clansByRarity já foi montado antes desta seção.
+    for _, rarity in ipairs(RARITY_ORDER) do
+        for _, clanName in ipairs(clansByRarity[rarity]) do
+            if clanName == value then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+
 local function readClanFromRoot(root)
 
     if not root then
         return nil
     end
 
-    -- Attributes
-    local ok, attributeClan = pcall(function()
-        return root:GetAttribute("Clan")
-    end)
+    -- 1. Atributos conhecidos.
+    for _, attributeName in ipairs({
+        "Clan",
+        "CurrentClan",
+        "ClanName",
+        "Current_Clan"
+    }) do
 
-    if ok and type(attributeClan) == "string" and attributeClan ~= "" then
-        return attributeClan
+        local ok, value = pcall(function()
+            return root:GetAttribute(attributeName)
+        end)
+
+        if ok and isKnownClanName(value) then
+            return value
+        end
     end
 
-    local okCurrent, currentAttribute = pcall(function()
-        return root:GetAttribute("CurrentClan")
+    -- 2. Qualquer atributo que contenha exatamente o nome de um Clan.
+    local attributesOK, attributes = pcall(function()
+        return root:GetAttributes()
     end)
 
-    if okCurrent and type(currentAttribute) == "string" and currentAttribute ~= "" then
-        return currentAttribute
+    if attributesOK and type(attributes) == "table" then
+        for _, value in pairs(attributes) do
+            if isKnownClanName(value) then
+                return value
+            end
+        end
     end
 
-    -- Valores chamados exatamente Clan / CurrentClan.
+    -- 3. StringValues/objetos nomeados Clan ou CurrentClan.
     for _, obj in ipairs(root:GetDescendants()) do
 
-        if obj.Name == "Clan" or obj.Name == "CurrentClan" then
+        if obj.Name == "Clan"
+            or obj.Name == "CurrentClan"
+            or obj.Name == "ClanName"
+            or obj.Name == "Current_Clan"
+        then
 
             if obj:IsA("StringValue") then
                 local value = obj.Value
-                if type(value) == "string" and value ~= "" then
+                if isKnownClanName(value) then
                     return value
                 end
+            end
+        end
+    end
+
+    -- 4. Fallback seguro: procura qualquer StringValue cujo valor
+    -- seja exatamente um Clan conhecido do jogo. Isso evita depender
+    -- do nome interno que o servidor usa para guardar o Clan.
+    for _, obj in ipairs(root:GetDescendants()) do
+
+        if obj:IsA("StringValue") then
+
+            local value = obj.Value
+
+            if isKnownClanName(value) then
+                return value
             end
         end
     end
@@ -1225,18 +1272,38 @@ end
 
 local function getCurrentClan()
 
-    -- 1. Atributos do jogador
+    -- 1. Dados/atributos diretamente no Player.
     local clan = readClanFromRoot(LocalPlayer)
+
     if clan then
         return clan
     end
 
-    -- 2. Dados do jogador
+    -- 2. Container de dados do jogador.
     local data = getPlayerDataContainer()
+
     clan = readClanFromRoot(data)
 
     if clan then
         return clan
+    end
+
+    -- 3. Fallback: procura em Player_Service/Data inteiro.
+    -- Isso é útil quando o nome do container da conta é dinâmico.
+    local playerService = ReplicatedStorage:FindFirstChild("Player_Service")
+
+    if playerService then
+
+        local dataRoot = playerService:FindFirstChild("Data")
+
+        if dataRoot then
+
+            clan = readClanFromRoot(dataRoot)
+
+            if clan then
+                return clan
+            end
+        end
     end
 
     return nil
@@ -1249,18 +1316,14 @@ local function isClanProtected(clanName)
         return false
     end
 
-    -- Qualquer alvo configurado pelo usuário também fica protegido.
-    if isTarget(clanName) then
-        return true
-    end
-
-    if not PROTECT_GOOD_CLANS then
+    if not PROTECT_SELECTED_ONLY then
         return false
     end
 
-    local rarity = getRarityName(clanName)
-
-    return PROTECTED_RARITIES[rarity] == true
+    -- A mesma lógica usada para decidir se o resultado do spin é alvo.
+    -- Portanto, a proteção acompanha exatamente as raridades/Clans
+    -- marcados pelo usuário.
+    return isTarget(clanName)
 end
 
 
@@ -1272,6 +1335,7 @@ local function notifyProtectedClan(clanName)
     print("[🛡️ PROTEÇÃO] Spin bloqueado")
     print("Clan atual:", tostring(clanName))
     print("Raridade:", tostring(rarity))
+    print("Motivo: Clan atual está entre os alvos selecionados.")
     print("========================================")
 
     Rayfield:Notify({
@@ -1280,7 +1344,7 @@ local function notifyProtectedClan(clanName)
             tostring(clanName)
             .. " | "
             .. tostring(rarity)
-            .. "\nAuto Spin não será iniciado.",
+            .. "\nEstá entre seus alvos selecionados.",
         Duration = 8
     })
 end
@@ -1288,13 +1352,14 @@ end
 
 local function waitForCurrentClan(timeout)
 
-    local deadline = os.clock() + (timeout or 15)
+    local deadline = os.clock() + (timeout or 20)
 
     repeat
 
         local clan = getCurrentClan()
 
         if clan then
+            print("[Proteção] Clan atual detectado:", clan, "[" .. getRarityName(clan) .. "]")
             return clan
         end
 
