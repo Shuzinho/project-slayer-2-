@@ -1097,6 +1097,8 @@ local selectedRarities = {}
 --========================================================--
 
 local autoSpin = false
+local autoSpinStarting = false
+local startupSequenceDone = false
 -- Impede o Auto Spin de iniciar enquanto o Rayfield restaura a configuração.
 -- As raridades podem ser restauradas depois do toggle AutoSpin.
 local loadingConfiguration = true
@@ -1609,6 +1611,14 @@ end
 
 
 local function openCustomizeAndWait()
+    -- Loading/Customize só precisa ser executado uma vez por sessão.
+    -- Ao desligar e ligar o Auto Spin novamente, o Skip já desapareceu;
+    -- não devemos procurar por ele de novo.
+    if startupSequenceDone then
+        print("[Customize] ✅ Sequência inicial já concluída; pulando Loading/Customize.")
+        return true
+    end
+
     local opened = openCustomize()
 
     if not opened then
@@ -1617,7 +1627,9 @@ local function openCustomizeAndWait()
 
     task.wait(1.5)
 
+    startupSequenceDone = true
     print("[Customize] Área de Customize carregada.")
+    print("[Customize] ✅ Sequência inicial concluída; não será repetida ao reativar Auto Spin.")
     return true
 end
 
@@ -2233,6 +2245,7 @@ SpinTab:CreateToggle({
         -- DESLIGAR
         if not Value then
 
+            autoSpinStarting = false
             spinning = false
 
             updateStatusVisual()
@@ -2253,9 +2266,11 @@ SpinTab:CreateToggle({
         end
 
 
-        if spinning then
+        if spinning or autoSpinStarting then
             return
         end
+
+        autoSpinStarting = true
 
 
         -- 🛡️ ANTES DE QUALQUER ClanSpin, confirma o Clan atual.
@@ -2274,6 +2289,7 @@ SpinTab:CreateToggle({
             end
 
             if not autoSpin then
+                autoSpinStarting = false
                 return
             end
 
@@ -2282,6 +2298,7 @@ SpinTab:CreateToggle({
             if not openCustomizeAndWait() then
 
                 autoSpin = false
+                autoSpinStarting = false
                 spinning = false
                 updateStatusVisual()
 
@@ -2299,6 +2316,7 @@ SpinTab:CreateToggle({
 
             -- O usuário desligou enquanto o Customize estava abrindo.
             if not autoSpin then
+                autoSpinStarting = false
                 return
             end
 
@@ -2306,6 +2324,7 @@ SpinTab:CreateToggle({
 
             -- O usuário desligou enquanto estávamos esperando.
             if not autoSpin then
+                autoSpinStarting = false
                 return
             end
 
@@ -2313,6 +2332,7 @@ SpinTab:CreateToggle({
             if not currentClan then
 
                 autoSpin = false
+                autoSpinStarting = false
                 spinning = false
                 updateStatusVisual()
 
@@ -2354,6 +2374,8 @@ SpinTab:CreateToggle({
                 Duration = 4
 
             })
+
+            autoSpinStarting = false
 
             while autoSpin do
 
