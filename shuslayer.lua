@@ -1,6 +1,6 @@
 --========================================================--
 --        PROJECT SLAYER 2 - CLAN SPINNER
---        Auto Spin + Target + Rarity
+--        Auto Spin + Target + Rarity + Auto Redeem
 --        Visual Confirmation
 --        Custom Size + Position Saving
 --        Created by ! Shu神
@@ -611,6 +611,329 @@ local SignalEvent = require(
 
 
 --========================================================--
+-- 🎁 AUTO REDEEM CODES
+--========================================================--
+
+local LiveConfig = require(
+    ReplicatedStorage.CAM.Global.LiveConfig
+)
+
+local autoRedeemEnabled = true
+local redeemRunning = false
+
+
+local function getAvailableCodes()
+
+    local result = {}
+
+    local ok, codesData = pcall(function()
+        return LiveConfig.get("Codes")
+    end)
+
+    if not ok or typeof(codesData) ~= "table" then
+        warn("[Auto Redeem] Não foi possível obter LiveConfig.Codes")
+        return result
+    end
+
+    local freeCodes = codesData.free
+
+    if typeof(freeCodes) ~= "table" then
+        warn("[Auto Redeem] Codes.free não está disponível")
+        return result
+    end
+
+    for code, data in pairs(freeCodes) do
+
+        if type(code) == "string" and code ~= "" then
+
+            table.insert(result, {
+                code = code,
+                data = data
+            })
+
+        end
+    end
+
+    table.sort(result, function(a, b)
+        return a.code < b.code
+    end)
+
+    return result
+end
+
+
+local function getCodeStatus()
+
+    local ok, result = pcall(function()
+        return SignalFunction.ToServer("CodeStatus")
+    end)
+
+    if ok and typeof(result) == "table" then
+        return result
+    end
+
+    warn(
+        "[Auto Redeem] CodeStatus falhou:",
+        tostring(result)
+    )
+
+    return nil
+end
+
+
+-- Retorna true somente quando os dados do codigo indicam recompensa de Spin/Giro.
+local function hasSpinReward(value, visited)
+    if type(value) == "string" then
+        local text = string.lower(value)
+        return string.find(text, "spin", 1, true) ~= nil
+            or string.find(text, "giro", 1, true) ~= nil
+    end
+
+    if type(value) ~= "table" then
+        return false
+    end
+
+    visited = visited or {}
+    if visited[value] then
+        return false
+    end
+    visited[value] = true
+
+    for key, child in pairs(value) do
+        if type(key) == "string" then
+            local keyText = string.lower(key)
+            if string.find(keyText, "spin", 1, true) ~= nil
+                or string.find(keyText, "giro", 1, true) ~= nil then
+                return true
+            end
+        end
+
+        if hasSpinReward(child, visited) then
+            return true
+        end
+    end
+
+    return false
+end
+
+
+local function isCodeAlreadyRedeemed(code, status)
+
+    if not status or typeof(status.codes) ~= "table" then
+        return false
+    end
+
+    local codeData = status.codes[code]
+
+    if typeof(codeData) == "table" then
+        return codeData.redeemed == true
+    end
+
+    return codeData == true
+end
+
+
+local function isCodeExpired(data)
+
+    if typeof(data) ~= "table" then
+        return false
+    end
+
+    local expires = data.expires
+
+    if type(expires) ~= "number" then
+        return false
+    end
+
+    return expires > 0 and expires <= os.time()
+end
+
+
+local function redeemSingleCode(code)
+
+    local ok, result = pcall(function()
+        return SignalFunction.ToServer("RedeemCode", code)
+    end)
+
+    if ok and result == true then
+        return true, "success"
+    end
+
+    return false, result
+end
+
+
+local function redeemAllCodes()
+
+    if redeemRunning then
+
+        Rayfield:Notify({
+            Title = "🎁 Auto Redeem",
+            Content = "O resgate já está em andamento.",
+            Duration = 3
+        })
+
+        return
+    end
+
+    redeemRunning = true
+
+    local codes = getAvailableCodes()
+
+    if #codes == 0 then
+
+        Rayfield:Notify({
+            Title = "🎁 Auto Redeem",
+            Content = "Nenhum código disponível foi encontrado.",
+            Duration = 4
+        })
+
+        redeemRunning = false
+        return
+    end
+
+    local status = getCodeStatus()
+
+    local redeemed = 0
+    local skipped = 0
+    local failed = 0
+
+    Rayfield:Notify({
+        Title = "🎁 Auto Redeem",
+        Content = "Verificando " .. tostring(#codes) .. " código(s)...",
+        Duration = 3
+    })
+
+    print("========================================")
+    print("[Auto Redeem] Códigos encontrados:", #codes)
+    print("========================================")
+
+    for _, entry in ipairs(codes) do
+
+        if not autoRedeemEnabled then
+            print("[Auto Redeem] Processo interrompido.")
+            break
+        end
+
+        local code = entry.code
+        local data = entry.data
+
+        -- Somente resgata codigos que entregam Spins/Giros.
+        -- Codigos de reset sao ignorados antes de chamar RedeemCode.
+        if not hasSpinReward(data) then
+            skipped += 1
+            print("[Auto Redeem] ⏭️ Ignorado (sem Spin/Giro):", code)
+
+        elseif isCodeExpired(data) then
+
+            skipped += 1
+
+            print(
+                "[Auto Redeem] ⏭️ Expirado:",
+                code
+            )
+
+        elseif isCodeAlreadyRedeemed(code, status) then
+
+            skipped += 1
+
+            print(
+                "[Auto Redeem] ⏭️ Já resgatado:",
+                code
+            )
+
+        else
+
+            print(
+                "[Auto Redeem] 🎁 Tentando:",
+                code
+            )
+
+            local success, reason =
+                redeemSingleCode(code)
+
+            if success then
+
+                redeemed += 1
+
+                print(
+                    "[Auto Redeem] ✅ Resgatado:",
+                    code
+                )
+
+                Rayfield:Notify({
+                    Title = "🎁 Código Resgatado",
+                    Content = code,
+                    Duration = 3
+                })
+
+                task.wait(0.35)
+
+                local newStatus = getCodeStatus()
+
+                if newStatus then
+                    status = newStatus
+                end
+
+            else
+
+                failed += 1
+
+                print(
+                    "[Auto Redeem] ❌ Falhou:",
+                    code,
+                    tostring(reason)
+                )
+
+            end
+
+            task.wait(0.5)
+        end
+    end
+
+    task.wait(0.25)
+
+    local finalStatus = getCodeStatus()
+
+    if finalStatus then
+        status = finalStatus
+    end
+
+    redeemRunning = false
+
+    local interrupted = not autoRedeemEnabled
+
+    if interrupted then
+
+        Rayfield:Notify({
+            Title = "🎁 Auto Redeem",
+            Content = "Processo interrompido.",
+            Duration = 4
+        })
+
+    else
+
+        Rayfield:Notify({
+            Title = "🎁 Auto Redeem",
+            Content =
+                "Resgatados: " .. tostring(redeemed)
+                .. " | Ignorados: " .. tostring(skipped)
+                .. " | Falhas: " .. tostring(failed),
+            Duration = 5
+        })
+
+    end
+
+    print("========================================")
+    print("[Auto Redeem] Finalizado")
+    print("[Auto Redeem] Resgatados:", redeemed)
+    print("[Auto Redeem] Ignorados:", skipped)
+    print("[Auto Redeem] Falhas:", failed)
+    print("========================================")
+end
+
+
+--========================================================--
 -- RARITIES
 --========================================================--
 
@@ -829,6 +1152,156 @@ local CreditsTab = Window:CreateTab(
     "👤 Créditos",
     4483362458
 )
+
+local CodesTab = Window:CreateTab(
+    "🎁 Codes",
+    4483362458
+)
+
+
+--========================================================--
+-- CODES TAB
+--========================================================--
+
+CodesTab:CreateSection(
+    "🎁 Resgate de Códigos"
+)
+
+
+CodesTab:CreateParagraph({
+
+    Title = "Auto Redeem",
+
+    Content =
+        "Encontra automaticamente os códigos atuais do jogo "
+        .. "e tenta resgatar os que ainda não foram utilizados."
+
+})
+
+
+CodesTab:CreateToggle({
+
+    Name = "🎁 Auto Redeem",
+
+    CurrentValue = true,
+
+    Flag = "AutoRedeem",
+
+    Callback = function(Value)
+
+        autoRedeemEnabled = Value
+
+        if Value then
+
+            task.spawn(function()
+                redeemAllCodes()
+            end)
+
+        end
+    end
+})
+
+
+CodesTab:CreateButton({
+
+    Name = "🔄 Resgatar Todos os Códigos",
+
+    Callback = function()
+
+        if redeemRunning then
+
+            Rayfield:Notify({
+                Title = "🎁 Auto Redeem",
+                Content = "O resgate já está em andamento.",
+                Duration = 3
+            })
+
+            return
+        end
+
+        autoRedeemEnabled = true
+
+        task.spawn(function()
+            redeemAllCodes()
+        end)
+    end
+})
+
+
+CodesTab:CreateButton({
+
+    Name = "📋 Ver Códigos Disponíveis",
+
+    Callback = function()
+
+        local allCodes = getAvailableCodes()
+        local codes = {}
+
+        for _, entry in ipairs(allCodes) do
+            if hasSpinReward(entry.data) then
+                table.insert(codes, entry)
+            end
+        end
+
+        print("========== CÓDIGOS DE SPIN/GIRO ==========")
+        if #codes == 0 then
+            print("Nenhum código de Spin/Giro encontrado.")
+        else
+            for _, entry in ipairs(codes) do
+                print("•", entry.code)
+            end
+        end
+
+        print("Total:", #codes)
+        print("=========================================")
+
+        Rayfield:Notify({
+            Title = "📋 Códigos",
+            Content =
+                "Encontrados "
+                .. tostring(#codes)
+                .. " código(s) de Spin/Giro. Veja o Output.",
+            Duration = 4
+        })
+    end
+})
+
+
+CodesTab:CreateButton({
+
+    Name = "📊 Atualizar Status",
+
+    Callback = function()
+
+        local status = getCodeStatus()
+
+        if not status then
+
+            Rayfield:Notify({
+                Title = "📊 Status",
+                Content = "Não foi possível consultar o status.",
+                Duration = 4
+            })
+
+            return
+        end
+
+        local redeemed = tonumber(status.redeemed) or 0
+        local total = tonumber(status.total) or 0
+
+        Rayfield:Notify({
+            Title = "📊 Status dos Códigos",
+            Content =
+                tostring(redeemed)
+                .. " / "
+                .. tostring(total)
+                .. " códigos resgatados.",
+            Duration = 4
+        })
+
+        print("[Auto Redeem] Status:", redeemed, "/", total)
+    end
+})
 
 
 --========================================================--
@@ -2512,6 +2985,27 @@ Rayfield:Notify({
     Duration = 5
 
 })
+
+
+--========================================================--
+-- AUTO REDEEM AO INICIAR
+--========================================================--
+
+-- O Auto Redeem inicia sozinho alguns instantes depois
+-- que o script e a interface terminam de carregar.
+-- Nao e necessario clicar no botao.
+
+task.delay(2, function()
+
+    if not autoRedeemEnabled then
+        return
+    end
+
+    task.spawn(function()
+        redeemAllCodes()
+    end)
+
+end)
 
 
 --========================================================--
