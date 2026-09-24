@@ -622,16 +622,61 @@ local autoRedeemEnabled = true
 local redeemRunning = false
 
 
+local function waitForLiveConfigCodes(timeout)
+
+    timeout = timeout or 45
+
+    local started = os.clock()
+    local announced = false
+
+    while os.clock() - started < timeout do
+
+        local ok, codesData = pcall(function()
+            return LiveConfig.get("Codes")
+        end)
+
+        if ok and typeof(codesData) == "table" then
+
+            local freeCodes = codesData.free
+
+            if typeof(freeCodes) == "table" then
+                print(
+                    "[Auto Redeem] ✅ LiveConfig.Codes carregado após "
+                    .. string.format("%.1f", os.clock() - started)
+                    .. "s."
+                )
+
+                return codesData
+            end
+        end
+
+        if not announced then
+            announced = true
+            print(
+                "[Auto Redeem] ⏳ Aguardando carregamento dos códigos..."
+            )
+        end
+
+        task.wait(0.5)
+    end
+
+    warn(
+        "[Auto Redeem] ❌ LiveConfig.Codes não carregou dentro de "
+        .. tostring(timeout)
+        .. "s."
+    )
+
+    return nil
+end
+
+
 local function getAvailableCodes()
 
     local result = {}
 
-    local ok, codesData = pcall(function()
-        return LiveConfig.get("Codes")
-    end)
+    local codesData = waitForLiveConfigCodes(45)
 
-    if not ok or typeof(codesData) ~= "table" then
-        warn("[Auto Redeem] Não foi possível obter LiveConfig.Codes")
+    if typeof(codesData) ~= "table" then
         return result
     end
 
@@ -662,19 +707,35 @@ local function getAvailableCodes()
 end
 
 
-local function getCodeStatus()
+local function getCodeStatus(timeout)
 
-    local ok, result = pcall(function()
-        return SignalFunction.ToServer("CodeStatus")
-    end)
+    timeout = timeout or 15
 
-    if ok and typeof(result) == "table" then
-        return result
+    local started = os.clock()
+    local warned = false
+
+    while os.clock() - started < timeout do
+
+        local ok, result = pcall(function()
+            return SignalFunction.ToServer("CodeStatus")
+        end)
+
+        if ok and typeof(result) == "table" then
+            return result
+        end
+
+        if not warned then
+            warned = true
+            print(
+                "[Auto Redeem] ⏳ Aguardando CodeStatus..."
+            )
+        end
+
+        task.wait(0.5)
     end
 
     warn(
-        "[Auto Redeem] CodeStatus falhou:",
-        tostring(result)
+        "[Auto Redeem] ❌ CodeStatus não ficou disponível."
     )
 
     return nil
@@ -1278,42 +1339,134 @@ end
 -- 🎨 ABRIR CUSTOMIZE AUTOMATICAMENTE
 --========================================================--
 
+local function waitForCustomizeButton(timeout)
+
+    timeout = timeout or 45
+
+    local started = os.clock()
+    local announced = false
+
+    while os.clock() - started < timeout do
+
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+
+        if playerGui then
+
+            local components =
+                playerGui:FindFirstChild("Components")
+
+            if components then
+
+                local menu =
+                    components:FindFirstChild("Menu")
+
+                if menu then
+
+                    local optionsHolder =
+                        menu:FindFirstChild("OptionsHolder")
+
+                    if optionsHolder then
+
+                        local presenter =
+                            optionsHolder:FindFirstChild(
+                                "2-CUSTOMIZE-Presenter"
+                            )
+
+                        if presenter then
+
+                            local button =
+                                presenter:FindFirstChild("Button")
+
+                            if button
+                                and button:IsA("TextButton")
+                                and button.Parent then
+
+                                print(
+                                    "[Customize] ✅ Botão encontrado após "
+                                    .. string.format(
+                                        "%.1f",
+                                        os.clock() - started
+                                    )
+                                    .. "s."
+                                )
+
+                                return button
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if not announced then
+            announced = true
+
+            print(
+                "[Customize] ⏳ Aguardando o carregamento da interface..."
+            )
+        end
+
+        task.wait(0.25)
+    end
+
+    warn(
+        "[Customize] ❌ Botão CUSTOMIZE não apareceu dentro de "
+        .. tostring(timeout)
+        .. "s."
+    )
+
+    return nil
+end
+
+
 local function openCustomize()
-
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-
-    if not playerGui then
-        warn("[Customize] PlayerGui não encontrado.")
-        return false
-    end
-
-    local components = playerGui:FindFirstChild("Components")
-    local menu = components and components:FindFirstChild("Menu")
-    local optionsHolder = menu and menu:FindFirstChild("OptionsHolder")
-    local presenter = optionsHolder and optionsHolder:FindFirstChild("2-CUSTOMIZE-Presenter")
-    local button = presenter and presenter:FindFirstChild("Button")
-
-    if not button then
-        warn("[Customize] Botão CUSTOMIZE não encontrado.")
-        return false
-    end
 
     if type(firesignal) ~= "function" then
         warn("[Customize] firesignal não está disponível.")
         return false
     end
 
-    local success, err = pcall(function()
-        firesignal(button.MouseButton1Click)
-    end)
+    local button = waitForCustomizeButton(45)
 
-    if not success then
-        warn("[Customize] Falha ao acionar o botão:", tostring(err))
+    if not button then
         return false
     end
 
-    print("[Customize] ✅ Botão CUSTOMIZE acionado.")
-    return true
+    for attempt = 1, 3 do
+
+        if not button.Parent then
+            button = waitForCustomizeButton(10)
+        end
+
+        if not button then
+            return false
+        end
+
+        local success, err = pcall(function()
+            firesignal(button.MouseButton1Click)
+        end)
+
+        if success then
+            print(
+                "[Customize] ✅ Botão CUSTOMIZE acionado. Tentativa "
+                .. tostring(attempt)
+                .. "."
+            )
+            return true
+        end
+
+        warn(
+            "[Customize] Falha na tentativa "
+            .. tostring(attempt)
+            .. ": "
+            .. tostring(err)
+        )
+
+        task.wait(0.5)
+    end
+
+    warn("[Customize] ❌ Não foi possível acionar o botão CUSTOMIZE.")
+    return false
 end
 
 
@@ -1326,7 +1479,7 @@ local function openCustomizeAndWait()
     end
 
     -- Dá tempo para a interface/área do Customize abrir.
-    task.wait(1)
+    task.wait(1.5)
 
     print("[Customize] Área de Customize carregada.")
     return true
