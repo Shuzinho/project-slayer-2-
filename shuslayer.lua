@@ -1,6 +1,6 @@
 --========================================================--
 --        PROJECT SLAYER 2 - CLAN SPINNER
---        Auto Spin + Target + Rarity + Auto Redeem
+--        Auto Spin + Target + Rarity + Auto Redeem + Auto Skip
 --        Visual Confirmation
 --        Custom Size + Position Saving
 --        Created by ! Shu神
@@ -1339,70 +1339,207 @@ end
 -- 🎨 ABRIR CUSTOMIZE AUTOMATICAMENTE
 --========================================================--
 
-local function waitForCustomizeButton(timeout)
+--========================================================--
+-- ⏩ AUTO SKIP DO LOADING (CAMINHO EXATO)
+--========================================================--
 
-    timeout = timeout or 45
+-- Descoberto pelo detector:
+-- Players.<Nome>.PlayerGui.Components.Holder.Skip_n_Loading_Holder
+--     .ButtonHolder.Content.TextButton
+--
+-- O "Skip loading!" é um TextLabel separado; o objeto clicável
+-- real é o TextButton abaixo dele.
+
+local function getExactSkipButton()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then
+        return nil
+    end
+
+    local components = playerGui:FindFirstChild("Components")
+    if not components then
+        return nil
+    end
+
+    local holder = components:FindFirstChild("Holder")
+    if not holder then
+        return nil
+    end
+
+    local skipHolder = holder:FindFirstChild("Skip_n_Loading_Holder")
+    if not skipHolder then
+        return nil
+    end
+
+    local buttonHolder = skipHolder:FindFirstChild("ButtonHolder")
+    if not buttonHolder then
+        return nil
+    end
+
+    local content = buttonHolder:FindFirstChild("Content")
+    if not content then
+        return nil
+    end
+
+    local button = content:FindFirstChild("TextButton")
+
+    if button and button:IsA("TextButton") then
+        return button
+    end
+
+    return nil
+end
+
+
+local function waitForExactSkipButton(timeout)
+    timeout = timeout or 30
 
     local started = os.clock()
-    local announced = false
+    local lastLog = -5
 
     while os.clock() - started < timeout do
+        local button = getExactSkipButton()
 
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if button then
+            local visible = true
+            local active = true
 
-        if playerGui then
+            pcall(function()
+                visible = button.Visible
+            end)
 
-            local components =
-                playerGui:FindFirstChild("Components")
+            pcall(function()
+                active = button.Active
+            end)
 
-            if components then
-
-                local menu =
-                    components:FindFirstChild("Menu")
-
-                if menu then
-
-                    local optionsHolder =
-                        menu:FindFirstChild("OptionsHolder")
-
-                    if optionsHolder then
-
-                        local presenter =
-                            optionsHolder:FindFirstChild(
-                                "2-CUSTOMIZE-Presenter"
-                            )
-
-                        if presenter then
-
-                            local button =
-                                presenter:FindFirstChild("Button")
-
-                            if button
-                                and button:IsA("TextButton")
-                                and button.Parent then
-
-                                print(
-                                    "[Customize] ✅ Botão encontrado após "
-                                    .. string.format(
-                                        "%.1f",
-                                        os.clock() - started
-                                    )
-                                    .. "s."
-                                )
-
-                                return button
-                            end
-                        end
-                    end
-                end
+            if visible and active ~= false then
+                print(
+                    "[Loading] 🎯 Skip encontrado após "
+                    .. string.format("%.1f", os.clock() - started)
+                    .. "s: "
+                    .. button:GetFullName()
+                )
+                return button
             end
         end
 
-        if not announced then
-            announced = true
-
+        if os.clock() - lastLog >= 5 then
+            lastLog = os.clock()
             print(
-                "[Customize] ⏳ Aguardando o carregamento da interface..."
+                "[Loading] ⏳ Aguardando Skip... "
+                .. string.format("%.1f", os.clock() - started)
+                .. "s"
+            )
+        end
+
+        task.wait(0.1)
+    end
+
+    return nil
+end
+
+
+local function clickExactSkipButton(button)
+    if not button or not button.Parent then
+        return false
+    end
+
+    if type(firesignal) ~= "function" then
+        warn("[Loading] ❌ firesignal não está disponível.")
+        return false
+    end
+
+    local success, err = pcall(function()
+        firesignal(button.MouseButton1Click)
+    end)
+
+    if success then
+        print("[Loading] ✅ Skip loading acionado!")
+        return true
+    end
+
+    warn("[Loading] ❌ Falha ao clicar no Skip:", tostring(err))
+    return false
+end
+
+
+local function waitAndSkipLoading(timeout)
+    timeout = timeout or 30
+
+    print("[Loading] ⏳ Procurando o botão Skip pelo caminho exato...")
+
+    local button = waitForExactSkipButton(timeout)
+
+    if not button then
+        print(
+            "[Loading] ℹ️ Skip não apareceu dentro de "
+            .. tostring(timeout)
+            .. "s. Continuando normalmente."
+        )
+        return false
+    end
+
+    -- O loading pode recriar o botão; fazemos até 3 tentativas rápidas.
+    for attempt = 1, 3 do
+        if not button.Parent then
+            button = waitForExactSkipButton(3)
+        end
+
+        if button and clickExactSkipButton(button) then
+            -- Aguarda a tela preta/loading desaparecer antes de continuar.
+            task.wait(2)
+            print("[Loading] ✅ Loading pulado; aguardando interface estabilizar.")
+            return true
+        end
+
+        if attempt < 3 then
+            task.wait(0.25)
+        end
+    end
+
+    warn("[Loading] ❌ Não foi possível acionar o Skip.")
+    return false
+end
+
+
+--========================================================--
+-- 🎨 CUSTOMIZE
+--========================================================--
+
+local function waitForCustomizeButton(timeout)
+    timeout = timeout or 45
+
+    local started = os.clock()
+    local lastLog = -5
+
+    while os.clock() - started < timeout do
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+
+        if playerGui then
+            local components = playerGui:FindFirstChild("Components")
+            local menu = components and components:FindFirstChild("Menu")
+            local optionsHolder = menu and menu:FindFirstChild("OptionsHolder")
+            local presenter = optionsHolder
+                and optionsHolder:FindFirstChild("2-CUSTOMIZE-Presenter")
+            local button = presenter and presenter:FindFirstChild("Button")
+
+            if button and button:IsA("TextButton") then
+                print(
+                    "[Customize] 🎯 Botão encontrado após "
+                    .. string.format("%.1f", os.clock() - started)
+                    .. "s: "
+                    .. button:GetFullName()
+                )
+                return button
+            end
+        end
+
+        if os.clock() - lastLog >= 5 then
+            lastLog = os.clock()
+            print(
+                "[Customize] ⏳ Aguardando interface... "
+                .. string.format("%.1f", os.clock() - started)
+                .. "s"
             )
         end
 
@@ -1420,11 +1557,13 @@ end
 
 
 local function openCustomize()
-
     if type(firesignal) ~= "function" then
         warn("[Customize] firesignal não está disponível.")
         return false
     end
+
+    -- Primeiro pula o loading pelo caminho exato descoberto.
+    waitAndSkipLoading(30)
 
     local button = waitForCustomizeButton(45)
 
@@ -1433,7 +1572,6 @@ local function openCustomize()
     end
 
     for attempt = 1, 3 do
-
         if not button.Parent then
             button = waitForCustomizeButton(10)
         end
@@ -1471,14 +1609,12 @@ end
 
 
 local function openCustomizeAndWait()
-
     local opened = openCustomize()
 
     if not opened then
         return false
     end
 
-    -- Dá tempo para a interface/área do Customize abrir.
     task.wait(1.5)
 
     print("[Customize] Área de Customize carregada.")
