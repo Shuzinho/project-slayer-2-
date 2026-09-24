@@ -1142,174 +1142,71 @@ end
 local PROTECT_SELECTED_ONLY = true
 
 
-local function getPlayerDataContainer()
+-- Retorna SOMENTE o Clan do slot atualmente equipado.
+-- Estrutura: Player_Service > Data > LocalPlayer.Name > slots > SlotX > Clan
+-- Não procura outros StringValues/fallbacks, evitando detectar Clan errado.
+local function getCurrentClan()
 
-    local roots = {
-        LocalPlayer,
-        ReplicatedStorage
-    }
+    local playerService =
+        ReplicatedStorage:FindFirstChild("Player_Service")
 
-    for _, root in ipairs(roots) do
-
-        local playerService = root:FindFirstChild("Player_Service")
-
-        if playerService then
-
-            local dataRoot = playerService:FindFirstChild("Data")
-
-            if dataRoot then
-
-                -- Primeiro tenta pelo nome do jogador.
-                local exact = dataRoot:FindFirstChild(LocalPlayer.Name)
-
-                if exact then
-                    return exact
-                end
-
-                -- Também procura um container de dados que possua
-                -- RedeemedCodes, estrutura já observada neste jogo.
-                for _, child in ipairs(dataRoot:GetChildren()) do
-                    if child:FindFirstChild("RedeemedCodes", true) then
-                        return child
-                    end
-                end
-            end
-        end
-    end
-
-    return nil
-end
-
-
-local function isKnownClanName(value)
-
-    if type(value) ~= "string" or value == "" then
-        return false
-    end
-
-    -- clansByRarity já foi montado antes desta seção.
-    for _, rarity in ipairs(RARITY_ORDER) do
-        for _, clanName in ipairs(clansByRarity[rarity]) do
-            if clanName == value then
-                return true
-            end
-        end
-    end
-
-    return false
-end
-
-
-local function readClanFromRoot(root)
-
-    if not root then
+    if not playerService then
         return nil
     end
 
-    -- 1. Atributos conhecidos.
-    for _, attributeName in ipairs({
-        "Clan",
-        "CurrentClan",
-        "ClanName",
-        "Current_Clan"
-    }) do
+    local data =
+        playerService:FindFirstChild("Data")
 
-        local ok, value = pcall(function()
-            return root:GetAttribute(attributeName)
-        end)
-
-        if ok and isKnownClanName(value) then
-            return value
-        end
+    if not data then
+        return nil
     end
 
-    -- 2. Qualquer atributo que contenha exatamente o nome de um Clan.
-    local attributesOK, attributes = pcall(function()
-        return root:GetAttributes()
-    end)
+    local playerData =
+        data:FindFirstChild(LocalPlayer.Name)
 
-    if attributesOK and type(attributes) == "table" then
-        for _, value in pairs(attributes) do
-            if isKnownClanName(value) then
-                return value
-            end
-        end
+    if not playerData then
+        return nil
     end
 
-    -- 3. StringValues/objetos nomeados Clan ou CurrentClan.
-    for _, obj in ipairs(root:GetDescendants()) do
+    local slotEquipped =
+        playerData:FindFirstChild("slotEquipped")
 
-        if obj.Name == "Clan"
-            or obj.Name == "CurrentClan"
-            or obj.Name == "ClanName"
-            or obj.Name == "Current_Clan"
-        then
+    local slots =
+        playerData:FindFirstChild("slots")
 
-            if obj:IsA("StringValue") then
-                local value = obj.Value
-                if isKnownClanName(value) then
-                    return value
-                end
-            end
-        end
+    if not slotEquipped or not slots then
+        return nil
     end
 
-    -- 4. Fallback seguro: procura qualquer StringValue cujo valor
-    -- seja exatamente um Clan conhecido do jogo. Isso evita depender
-    -- do nome interno que o servidor usa para guardar o Clan.
-    for _, obj in ipairs(root:GetDescendants()) do
+    local slotNumber =
+        tonumber(slotEquipped.Value)
 
-        if obj:IsA("StringValue") then
-
-            local value = obj.Value
-
-            if isKnownClanName(value) then
-                return value
-            end
-        end
+    if not slotNumber then
+        return nil
     end
 
-    return nil
-end
+    local slot =
+        slots:FindFirstChild("Slot" .. tostring(slotNumber))
 
-
-local function getCurrentClan()
-
-    -- 1. Dados/atributos diretamente no Player.
-    local clan = readClanFromRoot(LocalPlayer)
-
-    if clan then
-        return clan
+    if not slot then
+        return nil
     end
 
-    -- 2. Container de dados do jogador.
-    local data = getPlayerDataContainer()
+    local clan =
+        slot:FindFirstChild("Clan")
 
-    clan = readClanFromRoot(data)
-
-    if clan then
-        return clan
+    if not clan then
+        return nil
     end
 
-    -- 3. Fallback: procura em Player_Service/Data inteiro.
-    -- Isso é útil quando o nome do container da conta é dinâmico.
-    local playerService = ReplicatedStorage:FindFirstChild("Player_Service")
+    local clanName =
+        tostring(clan.Value)
 
-    if playerService then
-
-        local dataRoot = playerService:FindFirstChild("Data")
-
-        if dataRoot then
-
-            clan = readClanFromRoot(dataRoot)
-
-            if clan then
-                return clan
-            end
-        end
+    if clanName == "" or clanName == "None" then
+        return nil
     end
 
-    return nil
+    return clanName
 end
 
 
@@ -1323,9 +1220,6 @@ local function isClanProtected(clanName)
         return false
     end
 
-    -- A mesma lógica usada para decidir se o resultado do spin é alvo.
-    -- Portanto, a proteção acompanha exatamente as raridades/Clans
-    -- marcados pelo usuário.
     return isTarget(clanName)
 end
 
@@ -1362,7 +1256,13 @@ local function waitForCurrentClan(timeout)
         local clan = getCurrentClan()
 
         if clan then
-            print("[Proteção] Clan atual detectado:", clan, "[" .. getRarityName(clan) .. "]")
+            print(
+                "[Proteção] Clan atual detectado: "
+                .. tostring(clan)
+                .. " ["
+                .. tostring(getRarityName(clan))
+                .. "]"
+            )
             return clan
         end
 
