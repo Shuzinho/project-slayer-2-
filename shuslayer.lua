@@ -783,11 +783,72 @@ end
 
 
 --========================================================--
+-- CODES TAB - INTERFACE
+--========================================================--
+
+local CodeStatusParagraph = CodesTab:CreateParagraph({
+    Title = "🎁 Auto Redeem de Códigos",
+    Content = "O sistema resgata automaticamente códigos com\nrecompensas de SPIN ao entrar no jogo.\n\nStatus: Aguardando..."
+})
+
+local lastRedeemLog = "Nenhum resgate ainda."
+
+local function updateCodeStatus(msg)
+    lastRedeemLog = msg
+    pcall(function()
+        CodeStatusParagraph:Set({
+            Title = "🎁 Auto Redeem de Códigos",
+            Content = "Resgata códigos com recompensas de SPIN automaticamente.\n\n📋 Último log:\n" .. tostring(lastRedeemLog)
+        })
+    end)
+end
+
+CodesTab:CreateToggle({
+    Name = "♻️ Auto Redeem de Códigos",
+    CurrentValue = true,
+    Flag = "AutoRedeem",
+    Callback = function(Value)
+        autoRedeemEnabled = Value
+        if Value then
+            updateCodeStatus("Auto Redeem ATIVADO.")
+        else
+            updateCodeStatus("Auto Redeem DESATIVADO.")
+        end
+    end
+})
+
+CodesTab:CreateButton({
+    Name = "🎁 Resgatar Códigos Agora",
+    Callback = function()
+        if redeemRunning then
+            updateCodeStatus("⏳ Já está resgatando, aguarde...")
+            return
+        end
+        updateCodeStatus("⏳ Buscando e resgatando códigos...")
+        task.spawn(function()
+            redeemAllCodes()
+            updateCodeStatus("✅ Resgate manual concluído!")
+        end)
+    end
+})
+
+CodesTab:CreateParagraph({
+    Title = "ℹ️ Como funciona",
+    Content = "• Ao entrar no jogo, resgata automaticamente\n  todos os códigos ativos com recompensa de Spin.\n• Você também pode clicar em 'Resgatar Agora'\n  para forçar o resgate a qualquer momento.\n• Códigos já resgatados ou expirados são ignorados."
+})
+
+
+--========================================================--
 -- INICIALIZAÇÃO
 --========================================================--
 
 task.delay(2, function()
-    if autoRedeemEnabled then task.spawn(redeemAllCodes) end
+    if autoRedeemEnabled then
+        task.spawn(function()
+            redeemAllCodes()
+            updateCodeStatus("✅ Auto Redeem concluído ao iniciar!")
+        end)
+    end
 end)
 
 pcall(function() Rayfield:LoadConfiguration() end)
