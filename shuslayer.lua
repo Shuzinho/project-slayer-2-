@@ -35,8 +35,8 @@ local CONFIG_FOLDER = "ShuClanSpinner"
 local CONFIG_FILE = CONFIG_FOLDER .. "/window.cfg"
 
 -- Tamanho inicial
-local DEFAULT_WIDTH = 850
-local DEFAULT_HEIGHT = 650
+local DEFAULT_WIDTH = 600
+local DEFAULT_HEIGHT = 450
 
 -- Limites
 local MIN_WIDTH = 600
@@ -161,7 +161,7 @@ local function loadWindowConfig()
     local offsetX = tonumber(values[5])
     local offsetY = tonumber(values[6])
 
-    if not width or not height then
+    if not width or not height or (width == 850 and height == 650) then
         width = DEFAULT_WIDTH
         height = DEFAULT_HEIGHT
     end
