@@ -401,9 +401,16 @@ local selectedRarities = {
 -- via _G.ClanConfig (gerado pelo main.py a partir do
 -- games/projectslayers.json)
 -- ========================================================
+local _cfgAutoSpin = true -- valor padrão: auto giro ligado
+
 pcall(function()
     local cfg = _G.ClanConfig or (type(getgenv) == "function" and getgenv().ClanConfig) or nil
     if not cfg then return end
+
+    -- Auto Giro: controla se começa ligado ou desligado
+    if cfg["autoSpin"] ~= nil then
+        _cfgAutoSpin = cfg["autoSpin"] == true
+    end
 
     -- Raridades (ex: {"Rare"=false, "Legendary"=true, "Mythic"=true, "Supreme"=true})
     if type(cfg["Rarities"]) == "table" then
@@ -420,12 +427,13 @@ pcall(function()
     end
 
     print("[FARMER BLOX] Configs carregadas do sistema:")
+    print("  Auto Giro:", _cfgAutoSpin)
     for r, v in pairs(selectedRarities) do
         print("  Raridade:", r, "=", v)
     end
 end)
 
-local autoSpin = true  -- Padrão ativo para o auto-switcher
+local autoSpin = _cfgAutoSpin  -- usa o valor do _G.ClanConfig (ou true se não definido)
 local autoSpinStarting = false
 local targetLockedUntilReload = false
 local targetLockedClan = nil
