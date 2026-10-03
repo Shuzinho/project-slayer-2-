@@ -811,14 +811,230 @@ local function isCodeExpired(data)
 end
 
 
+--========================================================--
+-- 🖱️ UTILITÁRIO DE CLIQUE SEGURO (MÚLTIPLOS MÉTODOS)
+--========================================================--
+
+local function safeClick(btn)
+    if not btn or not btn.Parent then return false end
+    local fired = false
+    pcall(function()
+        if type(getconnections) == "function" then
+            for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do
+                conn:Fire()
+                fired = true
+            end
+            for _, conn in ipairs(getconnections(btn.Activated)) do
+                conn:Fire()
+                fired = true
+            end
+            for _, conn in ipairs(getconnections(btn.MouseButton1Down)) do
+                conn:Fire()
+                fired = true
+            end
+            for _, conn in ipairs(getconnections(btn.MouseButton1Up)) do
+                conn:Fire()
+                fired = true
+            end
+        end
+    end)
+    pcall(function()
+        if type(firesignal) == "function" then
+            firesignal(btn.MouseButton1Click)
+            firesignal(btn.Activated)
+            firesignal(btn.MouseButton1Down)
+            task.wait(0.02)
+            firesignal(btn.MouseButton1Up)
+            fired = true
+        end
+    end)
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        if vim and btn.AbsolutePosition and btn.AbsoluteSize then
+            local pos = btn.AbsolutePosition
+            local size = btn.AbsoluteSize
+            local x = pos.X + (size.X / 2)
+            local y = pos.Y + (size.Y / 2)
+            vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.05)
+            vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            fired = true
+        end
+    end)
+    return fired
+end
+
+
+--========================================================--
+-- 🎁 AUTO CONFIRMAÇÃO DE POPUP DE CÓDIGO (EX: 2X LUCK)
+--========================================================--
+
+local function isGreenButton(btn)
+    if not btn or not btn:IsA("GuiObject") then return false end
+    local ok, col = pcall(function() return btn.BackgroundColor3 end)
+    if ok and col then
+        if col.G > 0.35 and col.G > (col.R + 0.08) and col.G > col.B then
+            return true
+        end
+    end
+    for _, child in ipairs(btn:GetChildren()) do
+        if child:IsA("GuiObject") then
+            local okC, colC = pcall(function() return child.BackgroundColor3 end)
+            if okC and colC and colC.G > 0.35 and colC.G > (colC.R + 0.08) and colC.G > colC.B then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function confirmRedeemPrompt()
+    local searchRoots = {}
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then table.insert(searchRoots, pg) end
+    if type(gethui) == "function" then
+        pcall(function()
+            local h = gethui()
+            if h then table.insert(searchRoots, h) end
+        end)
+    end
+    local cg = game:GetService("CoreGui")
+    if cg then table.insert(searchRoots, cg) end
+
+    for _, root in ipairs(searchRoots) do
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local txt = ""
+                pcall(function() txt = tostring(obj.Text or "") end)
+
+                -- Detecta texto como: "This code hands over '2x Luck'. Redeem it now?"
+                if txt:find("hands over") or txt:find("Redeem it now") or (txt:find("This code") and txt:find("Redeem")) then
+                    print("[Auto Redeem] 🔔 Popup de confirmação detectado:", txt)
+
+                    local modal = obj.Parent
+                    local confirmBtn = nil
+
+                    for depth = 1, 6 do
+                        if not modal or modal == root then break end
+
+                        local buttons = {}
+                        for _, child in ipairs(modal:GetDescendants()) do
+                            if child:IsA("GuiButton") or child:IsA("TextButton") or child:IsA("ImageButton") then
+                                table.insert(buttons, child)
+                            end
+                        end
+
+                        if #buttons > 0 then
+                            -- 1. Procura botão com cor de fundo verde (✔)
+                            for _, btn in ipairs(buttons) do
+                                if isGreenButton(btn) then
+                                    confirmBtn = btn
+                                    break
+                                end
+                            end
+
+                            -- 2. Procura por nome ou texto afirmativo
+                            if not confirmBtn then
+                                for _, btn in ipairs(buttons) do
+                                    local name = tostring(btn.Name):lower()
+                                    local bTxt = ""
+                                    pcall(function() bTxt = tostring(btn.Text or "") end)
+                                    if name:find("confirm") or name:find("yes") or name:find("accept") or name:find("check")
+                                       or bTxt:find("✔") or bTxt:find("✓") or bTxt:find("√") or bTxt:lower() == "yes" then
+                                        confirmBtn = btn
+                                        break
+                                    end
+                                end
+                            end
+
+                            -- 3. Procura por ícone de check dentro do botão
+                            if not confirmBtn then
+                                for _, btn in ipairs(buttons) do
+                                    for _, sub in ipairs(btn:GetDescendants()) do
+                                        local sTxt = ""
+                                        pcall(function() sTxt = tostring(sub.Text or "") end)
+                                        if sTxt:find("✔") or sTxt:find("✓") or sTxt:find("√") then
+                                            confirmBtn = btn
+                                            break
+                                        end
+                                    end
+                                    if confirmBtn then break end
+                                end
+                            end
+
+                            -- 4. Fallback posicional: o botão de confirmação (verde ✔) é o da esquerda (menor X)
+                            if not confirmBtn and #buttons >= 2 then
+                                table.sort(buttons, function(a, b)
+                                    local ax = a.AbsolutePosition and a.AbsolutePosition.X or 0
+                                    local bx = b.AbsolutePosition and b.AbsolutePosition.X or 0
+                                    return ax < bx
+                                end)
+                                confirmBtn = buttons[1]
+                            end
+                        end
+
+                        if confirmBtn then break end
+                        modal = modal.Parent
+                    end
+
+                    if confirmBtn then
+                        print("[Auto Redeem] ✅ Clicando no botão aceitar (✔):", confirmBtn:GetFullName())
+                        safeClick(confirmBtn)
+                        task.wait(0.3)
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- Listener contínuo event-driven para fechar/aceitar popups de código instantaneamente (0 lag)
+pcall(function()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 10)
+    if pg then
+        pg.DescendantAdded:Connect(function(child)
+            task.wait(0.1)
+            pcall(function()
+                if child:IsA("TextLabel") or child:IsA("TextButton") then
+                    local t = tostring(child.Text or "")
+                    if t:find("hands over") or t:find("Redeem it now") then
+                        task.wait(0.2)
+                        confirmRedeemPrompt()
+                    end
+                end
+            end)
+        end)
+    end
+end)
+
+
 local function redeemSingleCode(code)
 
     local ok, result = pcall(function()
         return SignalFunction.ToServer("RedeemCode", code)
     end)
 
+    -- Verifica se o popup de confirmação (ex: 2x Luck) apareceu imediatamente
+    task.wait(0.3)
+    if confirmRedeemPrompt() then
+        task.wait(0.4)
+        return true, "confirmed_prompt"
+    end
+
     if ok and result == true then
         return true, "success"
+    end
+
+    -- Aguarda até 1.2s para caso o servidor demore a responder com o popup
+    local startWait = tick()
+    while tick() - startWait < 1.2 do
+        if confirmRedeemPrompt() then
+            task.wait(0.4)
+            return true, "confirmed_prompt"
+        end
+        task.wait(0.15)
     end
 
     return false, result
