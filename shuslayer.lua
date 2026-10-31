@@ -2735,7 +2735,31 @@ AutoSpinToggle = SpinTab:CreateToggle({
                         while redeemWaiting do
                             task.wait(1)
                         end
-                        print("[Auto Spin] Redeem concluido. Agora sinalizando SemSpins.")
+                        print("[Auto Spin] Redeem concluido. Tentando girar novamente...")
+
+                        -- Tenta mais um giro apos o redeem (pode ter recebido spins dos codigos)
+                        task.wait(0.5)
+                        local okRetry, resultRetry = pcall(function()
+                            return SignalFunction.ToServer("ClanSpin")
+                        end)
+
+                        if okRetry and resultRetry ~= nil then
+                            -- Tem giros! Reativa o auto spin
+                            print("[Auto Spin] Giros disponiveis apos redeem! Reativando auto spin.")
+                            Rayfield:Notify({
+                                Title = "Giros Encontrados",
+                                Content = "Spins disponiveis apos o resgate! Continuando...",
+                                Duration = 5
+                            })
+                            spinning = false
+                            autoSpin = true
+                            if AutoSpinToggle then
+                                AutoSpinToggle:Set(true)
+                            end
+                            return
+                        else
+                            print("[Auto Spin] Sem giros mesmo apos redeem. Sinalizando SemSpins.")
+                        end
                     end
                     pcall(function()
                         if canUseFiles() then
