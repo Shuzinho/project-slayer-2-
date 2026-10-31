@@ -3941,42 +3941,82 @@ task.delay(2, function()
         -- Sinaliza que o redeem esta no periodo de espera (impede encerramento prematuro)
         redeemWaiting = true
 
-        -- Aguarda 5 minutos para o timer do servidor liberar o resgate
-        local waitSeconds = 5 * 60  -- 300 segundos
-        local interval   = 60       -- notifica a cada 1 minuto
-
-        Rayfield:Notify({
-            Title = "Resgate de Codigos",
-            Content = "Aguardando 5 minutos para o timer do servidor liberar o resgate...",
-            Duration = 6
-        })
-
-        print("[Auto Redeem] Aguardando " .. tostring(waitSeconds) .. "s antes de resgatar os codigos.")
-
-        local elapsed = 0
-        while elapsed < waitSeconds do
-            if elapsed > 0 and elapsed % interval == 0 then
-                local remaining = waitSeconds - elapsed
-                local mins = math.floor(remaining / 60)
-                local secs = remaining % 60
-                Rayfield:Notify({
-                    Title = "Resgate de Codigos",
-                    Content = "Resgate em " .. tostring(mins) .. "m " .. tostring(secs) .. "s...",
-                    Duration = 5
-                })
-                print("[Auto Redeem] Resgate em " .. tostring(mins) .. "m " .. tostring(secs) .. "s")
+        -- ================================================================
+        -- DETECCAO INTELIGENTE DO TIMER DE RESGATE
+        -- Testa se o servidor ja liberou o resgate antes de esperar 300s.
+        -- Usa um codigo invalido: se retornar bloqueio de timer -> espera.
+        -- Se retornar erro de codigo invalido -> timer ja passou, vai direto.
+        -- ================================================================
+        local function isRedeemLocked()
+            local ok, result = pcall(function()
+                return SignalFunction.ToServer("RedeemCode", "__TIMER_CHECK__")
+            end)
+            -- Se o servidor retornar false/nil com mensagem de lock, esta bloqueado
+            -- Se retornar false por codigo invalido, esta liberado
+            if not ok then return true end  -- erro de rede -> assume bloqueado por seguranca
+            if result == nil then return true end
+            -- Verifica se a resposta contem indicacao de timer/lock
+            local resultStr = tostring(result):lower()
+            if resultStr:find("time") or resultStr:find("wait") or resultStr:find("lock") or resultStr:find("later") then
+                return true
             end
-            task.wait(1)
-            elapsed += 1
+            -- Qualquer outra resposta (inclusive codigo invalido) = timer liberado
+            return false
         end
 
-        Rayfield:Notify({
-            Title = "Resgate de Codigos",
-            Content = "Timer liberado! Iniciando resgate dos codigos...",
-            Duration = 4
-        })
+        -- Checa se o timer ja expirou
+        print("[Auto Redeem] Verificando se o timer de resgate ja expirou...")
+        task.wait(3)  -- pequena espera para o jogo carregar completamente
 
-        print("[Auto Redeem] Timer cumprido. Iniciando redeemAllCodes.")
+        local locked = isRedeemLocked()
+
+        if not locked then
+            -- Timer ja expirou! Vai direto ao resgate
+            print("[Auto Redeem] Timer ja expirou! Resgatando codigos imediatamente.")
+            Rayfield:Notify({
+                Title = "Resgate de Codigos",
+                Content = "Timer ja liberado! Resgatando codigos agora...",
+                Duration = 4
+            })
+        else
+            -- Timer ainda ativo: aguarda os 5 minutos contando segundo a segundo
+            local waitSeconds = 5 * 60  -- 300 segundos
+            local interval   = 60       -- notifica a cada 1 minuto
+
+            Rayfield:Notify({
+                Title = "Resgate de Codigos",
+                Content = "Aguardando 5 minutos para o timer do servidor liberar o resgate...",
+                Duration = 6
+            })
+
+            print("[Auto Redeem] Aguardando " .. tostring(waitSeconds) .. "s antes de resgatar os codigos.")
+
+            local elapsed = 0
+            while elapsed < waitSeconds do
+                if elapsed > 0 and elapsed % interval == 0 then
+                    local remaining = waitSeconds - elapsed
+                    local mins = math.floor(remaining / 60)
+                    local secs = remaining % 60
+                    Rayfield:Notify({
+                        Title = "Resgate de Codigos",
+                        Content = "Resgate em " .. tostring(mins) .. "m " .. tostring(secs) .. "s...",
+                        Duration = 5
+                    })
+                    print("[Auto Redeem] Resgate em " .. tostring(mins) .. "m " .. tostring(secs) .. "s")
+                end
+                task.wait(1)
+                elapsed += 1
+            end
+
+            Rayfield:Notify({
+                Title = "Resgate de Codigos",
+                Content = "Timer liberado! Iniciando resgate dos codigos...",
+                Duration = 4
+            })
+
+            print("[Auto Redeem] Timer cumprido. Iniciando redeemAllCodes.")
+        end
+
         redeemAllCodes()
 
         -- Timer e resgate concluidos: libera o encerramento
