@@ -2714,74 +2714,75 @@ AutoSpinToggle = SpinTab:CreateToggle({
                         "[Auto Spin] Resultado nil - Spin não autorizado ou sem giros"
                     )
 
-                    autoSpin = false
-                    spinning = false
-
-                    updateResultVisual(
-                        "nil"
-                    )
-
-                    updateStatusVisual()
-
-                    -- Avisa Farmer Blox que acabaram os spins nesta conta
-                    -- Se o redeem ainda esta aguardando o timer, espera ele terminar antes
+                    -- Se o redeem ainda está aguardando o timer, espera pacientemente
                     if redeemWaiting then
-                        print("[Auto Spin] Sem giros, mas redeem ainda no timer. Aguardando redeem concluir...")
+                        print("[Auto Spin] Sem giros no momento, aguardando o timer de codigos liberar...")
                         Rayfield:Notify({
                             Title = "Sem Giros",
-                            Content = "Aguardando o resgate de codigos antes de encerrar...",
+                            Content = "Aguardando o resgate de codigos para obter novos giros...",
                             Duration = 6
                         })
                         while redeemWaiting do
                             task.wait(1)
                         end
-                        print("[Auto Spin] Redeem concluido. Tentando girar novamente...")
+                        print("[Auto Spin] Redeem de codigos concluido! Aguardando 2.5s para sincronizar...")
+                        task.wait(2.5)
 
-                        -- Tenta mais um giro apos o redeem (pode ter recebido spins dos codigos)
-                        task.wait(0.5)
+                        -- Tenta girar novamente dentro do proprio loop
                         local okRetry, resultRetry = pcall(function()
                             return SignalFunction.ToServer("ClanSpin")
                         end)
 
                         if okRetry and resultRetry ~= nil then
-                            -- Tem giros! Reativa o auto spin
-                            print("[Auto Spin] Giros disponiveis apos redeem! Reativando auto spin.")
-                            Rayfield:Notify({
-                                Title = "Giros Encontrados",
-                                Content = "Spins disponiveis apos o resgate! Continuando...",
-                                Duration = 5
-                            })
+                            print("[Auto Spin] ✅ Novos giros creditados pelos codigos! Continuando Auto Spin...")
                             spinning = false
                             autoSpin = true
-                            if AutoSpinToggle then
-                                AutoSpinToggle:Set(true)
-                            end
-                            return
+                            -- Processa esse resultado como um spin válido
+                            result = resultRetry
                         else
-                            print("[Auto Spin] Sem giros mesmo apos redeem. Sinalizando SemSpins.")
+                            print("[Auto Spin] ⚠️ Sem giros mesmo apos o resgate.")
                         end
                     end
-                    pcall(function()
-                        if canUseFiles() then
-                            local safeName = tostring(LocalPlayer.Name):gsub("[^%w_%-]", "_")
-                            writefile("done_" .. safeName .. ".txt", "Clan:SemSpins")
+
+                    -- Se após a espera ainda for nil, faz retry de segurança antes de declarar SemSpins
+                    if result == nil then
+                        local confirmedNoSpins = true
+                        for retryCount = 1, 2 do
+                            task.wait(1.5)
+                            local okCheck, resCheck = pcall(function()
+                                return SignalFunction.ToServer("ClanSpin")
+                            end)
+                            if okCheck and resCheck ~= nil then
+                                print("[Auto Spin] ✅ Giro confirmado no retry #" .. tostring(retryCount) .. "!")
+                                result = resCheck
+                                confirmedNoSpins = false
+                                break
+                            end
                         end
-                    end)
 
-                    Rayfield:Notify({
+                        if confirmedNoSpins then
+                            autoSpin = false
+                            spinning = false
+                            updateResultVisual("nil")
+                            updateStatusVisual()
 
-                        Title =
-                            "🚫 Spin bloqueado / Sem Giros",
+                            print("[Auto Spin] Confirmado: todos os giros foram esgotados. Finalizando...")
+                            pcall(function()
+                                if canUseFiles() then
+                                    local safeName = tostring(LocalPlayer.Name):gsub("[^%w_%-]", "_")
+                                    writefile("done_" .. safeName .. ".txt", "Clan:SemSpins")
+                                end
+                            end)
 
-                        Content =
-                            "O servidor não retornou um Clan."
-                            .. "\nAuto Spin foi parado.",
+                            Rayfield:Notify({
+                                Title = "🚫 Sem Giros",
+                                Content = "Todos os giros foram esgotados.\nEncerrando sessão.",
+                                Duration = 8
+                            })
 
-                        Duration = 8
-
-                    })
-
-                    break
+                            break
+                        end
+                    end
                 end
 
 
@@ -4078,12 +4079,20 @@ print("[Proteção] LoadConfiguration concluído; Auto Spin liberado para verifi
 
 
 -- Se configurado via Farmer Blox / global config para auto-girar, ativa o toggle
+-- Aguarda o Auto Redeem terminar se houver códigos/timer pendentes
 task.delay(3, function()
     pcall(function()
         local cfg = _G.ClanConfig or (type(getgenv) == "function" and getgenv().ClanConfig) or nil
         if cfg and (cfg.autoSpin == true or cfg.autoSpin == nil) then
+            if autoRedeemEnabled and redeemWaiting then
+                print("[Farmer Blox] Aguardando conclusao do timer de resgate antes de iniciar Auto Spin...")
+                while redeemWaiting do
+                    task.wait(1)
+                end
+                task.wait(2.5) -- espera o servidor computar os giros recebidos dos codigos
+            end
             if AutoSpinToggle and not autoSpin and not targetFound then
-                print("[Farmer Blox] Auto Spin ativado automaticamente via configuração global.")
+                print("[Farmer Blox] Auto Spin ativado automaticamente via configuracao global.")
                 AutoSpinToggle:Set(true)
             end
         end
