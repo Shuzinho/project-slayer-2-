@@ -3942,59 +3942,94 @@ task.delay(2, function()
         redeemWaiting = true
 
         -- ================================================================
-        -- DETECCAO INTELIGENTE DO TIMER DE RESGATE
-        -- Testa se o servidor ja liberou o resgate antes de esperar 300s.
-        -- Usa um codigo invalido: se retornar bloqueio de timer -> espera.
-        -- Se retornar erro de codigo invalido -> timer ja passou, vai direto.
+        -- DETECCAO DO TIMER PELA UI DO JOGO
+        -- Dispara um redeem de teste para ativar o popup de lock (se houver).
+        -- Depois le o timer diretamente da TextLabel que aparece na tela
+        -- com o texto "Redeeming will be unlocked in this time".
+        -- Retorna os segundos restantes, ou 0 se ja liberado.
         -- ================================================================
-        local function isRedeemLocked()
-            local ok, result = pcall(function()
-                return SignalFunction.ToServer("RedeemCode", "__TIMER_CHECK__")
+        local function getRedeemLockSeconds()
+            -- Dispara um codigo de teste para forcar o popup de lock aparecer
+            pcall(function()
+                SignalFunction.ToServer("RedeemCode", "__SHUCHECK__")
             end)
-            -- Se o servidor retornar false/nil com mensagem de lock, esta bloqueado
-            -- Se retornar false por codigo invalido, esta liberado
-            if not ok then return true end  -- erro de rede -> assume bloqueado por seguranca
-            if result == nil then return true end
-            -- Verifica se a resposta contem indicacao de timer/lock
-            local resultStr = tostring(result):lower()
-            if resultStr:find("time") or resultStr:find("wait") or resultStr:find("lock") or resultStr:find("later") then
-                return true
+            task.wait(1.0)  -- aguarda a UI atualizar
+
+            local pg = LocalPlayer:FindFirstChild("PlayerGui")
+            if not pg then return 0 end
+
+            local foundLock  = false
+            local timerSecs  = 0
+
+            -- Busca em todos os TextLabels do PlayerGui
+            for _, obj in ipairs(pg:GetDescendants()) do
+                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                    local lower = tostring(obj.Text or ""):lower()
+
+                    -- Detecta textos de lock do jogo
+                    if lower:find("unlocked in this time", 1, true)
+                    or lower:find("leaving restarts",      1, true)
+                    or lower:find("redeeming will be",     1, true) then
+                        foundLock = true
+                    end
+
+                    -- Detecta formato de timer MM:SS ou M:SS
+                    local raw = tostring(obj.Text or ""):match("^%s*(%d+:%d%d)%s*$")
+                    if raw then
+                        local m, s = raw:match("(%d+):(%d%d)")
+                        if m and s then
+                            local total = tonumber(m) * 60 + tonumber(s)
+                            if total > timerSecs then
+                                timerSecs = total
+                            end
+                        end
+                    end
+                end
             end
-            -- Qualquer outra resposta (inclusive codigo invalido) = timer liberado
-            return false
+
+            if foundLock then
+                -- Se nao conseguiu ler o timer exato, usa 300s como fallback seguro
+                local result = timerSecs > 0 and timerSecs or 300
+                print("[Auto Redeem] Lock detectado pela UI. Timer restante: " .. tostring(result) .. "s")
+                return result + 5  -- +5s de buffer
+            end
+
+            print("[Auto Redeem] Nenhum lock detectado na UI. Timer ja expirou.")
+            return 0
         end
 
-        -- Checa se o timer ja expirou
-        print("[Auto Redeem] Verificando se o timer de resgate ja expirou...")
-        task.wait(3)  -- pequena espera para o jogo carregar completamente
+        -- Aguarda o jogo carregar antes de verificar
+        print("[Auto Redeem] Aguardando jogo carregar para verificar timer...")
+        task.wait(5)
 
-        local locked = isRedeemLocked()
+        local lockSeconds = getRedeemLockSeconds()
 
-        if not locked then
-            -- Timer ja expirou! Vai direto ao resgate
-            print("[Auto Redeem] Timer ja expirou! Resgatando codigos imediatamente.")
+        if lockSeconds <= 0 then
+            -- Timer ja expirou: vai direto
+            print("[Auto Redeem] Timer ja liberado! Resgatando codigos imediatamente.")
             Rayfield:Notify({
                 Title = "Resgate de Codigos",
                 Content = "Timer ja liberado! Resgatando codigos agora...",
                 Duration = 4
             })
         else
-            -- Timer ainda ativo: aguarda os 5 minutos contando segundo a segundo
-            local waitSeconds = 5 * 60  -- 300 segundos
-            local interval   = 60       -- notifica a cada 1 minuto
+            -- Timer ativo: conta os segundos exatos que o servidor indicou
+            local interval = 60
+
+            local mins0 = math.floor(lockSeconds / 60)
+            local secs0 = lockSeconds % 60
+            print("[Auto Redeem] Timer ativo: aguardando " .. tostring(mins0) .. "m " .. tostring(secs0) .. "s.")
 
             Rayfield:Notify({
                 Title = "Resgate de Codigos",
-                Content = "Aguardando 5 minutos para o timer do servidor liberar o resgate...",
-                Duration = 6
+                Content = "Timer: " .. tostring(mins0) .. "m " .. tostring(secs0) .. "s para liberar o resgate...",
+                Duration = 7
             })
 
-            print("[Auto Redeem] Aguardando " .. tostring(waitSeconds) .. "s antes de resgatar os codigos.")
-
             local elapsed = 0
-            while elapsed < waitSeconds do
+            while elapsed < lockSeconds do
                 if elapsed > 0 and elapsed % interval == 0 then
-                    local remaining = waitSeconds - elapsed
+                    local remaining = lockSeconds - elapsed
                     local mins = math.floor(remaining / 60)
                     local secs = remaining % 60
                     Rayfield:Notify({
@@ -4019,7 +4054,7 @@ task.delay(2, function()
 
         redeemAllCodes()
 
-        -- Timer e resgate concluidos: libera o encerramento
+        -- Resgate concluido: libera o encerramento
         redeemWaiting = false
         print("[Auto Redeem] redeemWaiting = false. Encerramento liberado.")
 
