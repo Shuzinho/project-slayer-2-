@@ -621,6 +621,7 @@ local LiveConfig = require(
 
 local autoRedeemEnabled = true
 local redeemRunning = false
+local redeemWaiting = false
 
 
 local function waitForLiveConfigCodes(timeout)
@@ -2723,6 +2724,19 @@ AutoSpinToggle = SpinTab:CreateToggle({
                     updateStatusVisual()
 
                     -- Avisa Farmer Blox que acabaram os spins nesta conta
+                    -- Se o redeem ainda esta aguardando o timer, espera ele terminar antes
+                    if redeemWaiting then
+                        print("[Auto Spin] Sem giros, mas redeem ainda no timer. Aguardando redeem concluir...")
+                        Rayfield:Notify({
+                            Title = "Sem Giros",
+                            Content = "Aguardando o resgate de codigos antes de encerrar...",
+                            Duration = 6
+                        })
+                        while redeemWaiting do
+                            task.wait(1)
+                        end
+                        print("[Auto Spin] Redeem concluido. Agora sinalizando SemSpins.")
+                    end
                     pcall(function()
                         if canUseFiles() then
                             local safeName = tostring(LocalPlayer.Name):gsub("[^%w_%-]", "_")
@@ -3900,6 +3914,9 @@ task.delay(2, function()
 
     task.spawn(function()
 
+        -- Sinaliza que o redeem esta no periodo de espera (impede encerramento prematuro)
+        redeemWaiting = true
+
         -- Aguarda 5 minutos para o timer do servidor liberar o resgate
         local waitSeconds = 5 * 60  -- 300 segundos
         local interval   = 60       -- notifica a cada 1 minuto
@@ -3937,6 +3954,10 @@ task.delay(2, function()
 
         print("[Auto Redeem] Timer cumprido. Iniciando redeemAllCodes.")
         redeemAllCodes()
+
+        -- Timer e resgate concluidos: libera o encerramento
+        redeemWaiting = false
+        print("[Auto Redeem] redeemWaiting = false. Encerramento liberado.")
 
     end)
 
