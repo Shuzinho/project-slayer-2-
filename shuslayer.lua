@@ -3899,7 +3899,45 @@ task.delay(2, function()
     end
 
     task.spawn(function()
+
+        -- Aguarda 5 minutos para o timer do servidor liberar o resgate
+        local waitSeconds = 5 * 60  -- 300 segundos
+        local interval   = 60       -- notifica a cada 1 minuto
+
+        Rayfield:Notify({
+            Title = "Resgate de Codigos",
+            Content = "Aguardando 5 minutos para o timer do servidor liberar o resgate...",
+            Duration = 6
+        })
+
+        print("[Auto Redeem] Aguardando " .. tostring(waitSeconds) .. "s antes de resgatar os codigos.")
+
+        local elapsed = 0
+        while elapsed < waitSeconds do
+            if elapsed > 0 and elapsed % interval == 0 then
+                local remaining = waitSeconds - elapsed
+                local mins = math.floor(remaining / 60)
+                local secs = remaining % 60
+                Rayfield:Notify({
+                    Title = "Resgate de Codigos",
+                    Content = "Resgate em " .. tostring(mins) .. "m " .. tostring(secs) .. "s...",
+                    Duration = 5
+                })
+                print("[Auto Redeem] Resgate em " .. tostring(mins) .. "m " .. tostring(secs) .. "s")
+            end
+            task.wait(1)
+            elapsed += 1
+        end
+
+        Rayfield:Notify({
+            Title = "Resgate de Codigos",
+            Content = "Timer liberado! Iniciando resgate dos codigos...",
+            Duration = 4
+        })
+
+        print("[Auto Redeem] Timer cumprido. Iniciando redeemAllCodes.")
         redeemAllCodes()
+
     end)
 
 end)
